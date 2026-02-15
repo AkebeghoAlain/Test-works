@@ -12,31 +12,53 @@ export const scannerRouter = Router();
 scannerRouter.post('/verify', requireAuth, requireRole('ORGANIZER', 'ADMIN'), scanRateLimiter, async (req: AuthRequest, res) => {
   const body = z.object({ ticketCode: z.string(), qrPayload: z.string(), qrSignature: z.string() }).parse(req.body);
 
-  const ticket = await prisma.ticket.findUnique({ where: { ticketCode: body.ticketCode } });
-  if (!ticket) return res.status(404).json({ code: 'INVALID', color: 'red', message: 'Invalid Ticket' });
+  const ticket = await prisma.ticket.findUnique({
+    where: { ticketCode: body.ticketCode },
+    include: { user: { select: { fullName: true } }, ticketCategory: { select: { name: true } } }
+  });
+
+  if (!ticket) {
+    return res.status(404).json({ code: 'INVALID', color: 'red', message: 'Invalid Ticket' });
+  }
 
   const expected = signQrPayload(body.qrPayload, env.QR_HMAC_SECRET);
   if (!safeEqual(expected, body.qrSignature) || !safeEqual(ticket.qrSignature, body.qrSignature)) {
+    await prisma.ticketScan.create({
+      data: { ticketId: ticket.id, scannedByUserId: req.auth!.userId, isValid: false, responseCode: 'INVALID_SIGNATURE' }
+    });
     return res.status(400).json({ code: 'INVALID', color: 'red', message: 'Invalid Ticket' });
   }
 
   if (ticket.status === TicketStatus.USED) {
-    return res.status(200).json({ code: 'USED', color: 'orange', message: 'Already Used', ticket });
+    await prisma.ticketScan.create({
+      data: { ticketId: ticket.id, scannedByUserId: req.auth!.userId, isValid: false, responseCode: 'USED' }
+    });
+    return res.status(200).json({
+      code: 'USED',
+      color: 'orange',
+      message: 'Already Used',
+      holderName: ticket.user.fullName,
+      category: ticket.ticketCategory.name
+    });
   }
 
   if (ticket.status !== TicketStatus.UNUSED) {
+    await prisma.ticketScan.create({
+      data: { ticketId: ticket.id, scannedByUserId: req.auth!.userId, isValid: false, responseCode: 'INVALID_STATUS' }
+    });
     return res.status(400).json({ code: 'INVALID', color: 'red', message: 'Invalid Ticket' });
   }
 
-  const updated = await prisma.ticket.update({ where: { id: ticket.id }, data: { status: TicketStatus.USED, usedAt: new Date() } });
+  await prisma.ticket.update({ where: { id: ticket.id }, data: { status: TicketStatus.USED, usedAt: new Date() } });
   await prisma.ticketScan.create({
-    data: {
-      ticketId: ticket.id,
-      scannedByUserId: req.auth!.userId,
-      isValid: true,
-      responseCode: 'VALID'
-    }
+    data: { ticketId: ticket.id, scannedByUserId: req.auth!.userId, isValid: true, responseCode: 'VALID' }
   });
 
-  return res.json({ code: 'VALID', color: 'green', message: 'Valid Ticket', ticket: updated });
+  return res.json({
+    code: 'VALID',
+    color: 'green',
+    message: 'Valid Ticket',
+    holderName: ticket.user.fullName,
+    category: ticket.ticketCategory.name
+  });
 });
