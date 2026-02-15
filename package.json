@@ -1,0 +1,18 @@
+{
+  "name": "cam-ticket-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @camticket/backend\" \"npm run dev -w @camticket/frontend\"",
+    "build": "npm run build -w @camticket/backend && npm run build -w @camticket/frontend",
+    "lint": "npm run lint -w @camticket/backend && npm run lint -w @camticket/frontend",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "prettier": "^3.3.3"
+  }
+}
